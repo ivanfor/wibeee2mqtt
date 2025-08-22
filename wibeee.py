@@ -176,7 +176,7 @@ broker_password = config['mqtt']['password']
 
 my_logging('Starting wibeee2mqtt... ')
 
-client = mqttClient.Client("wibeee2mqtt client")
+client = mqttClient.Client(mqttClient.CallbackAPIVersion.VERSION1, "wibeee2mqtt client")
 client.username_pw_set(broker_username, password=broker_password)
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
