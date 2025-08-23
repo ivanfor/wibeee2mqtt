@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 import syslog
 import logging, sys
 import urllib3
+import os
 
 Connected = 0
 HA_DISCOVERY_PUBLISHED = False  # to ensure that we only publish one time to autodiscovery
@@ -158,21 +159,70 @@ def publish_ha_discovery(client):
 
         HA_DISCOVERY_PUBLISHED = True  # marked as published
 
+def get_config_value(section, key, default=None, env_var=None):
+    """
+    Tries to get the value from config file, then from environment variable, then uses default.
+    """
+    # Try config file
+    try:
+        value = config[section][key]
+        if value != "":
+            return value
+    except Exception:
+        pass
+    # Try environment variable
+    if env_var is None:
+        env_var = f"WIBEEE_{section.upper()}_{key.upper()}"
+    return os.environ.get(env_var, default)
+
+def check_required_config():
+    missing = []
+    # Lista de claves requeridas: (section, key, env_var)
+    required = [
+        ('wibeee', 'wibeee_url', 'WIBEEE_URL'),
+        ('mqtt', 'address', 'MQTT_ADDRESS'),
+        ('mqtt', 'port', 'MQTT_PORT'),
+    ]
+    for section, key, env_var in required:
+        value = get_config_value(section, key, default=None, env_var=env_var)
+        if value is None:
+            missing.append(f"{section}.{key} (env: {env_var})")
+    if missing:
+        logging.error(
+            "Missing required configuration values:\n" +
+            "\n".join(missing)
+        )
+        sys.exit(1)
+
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
+
 config = configparser.ConfigParser()
-config.read('wibeee2mqtt.conf')
+config_file = 'wibeee2mqtt.conf'
+config.read(config_file)
 
-DEBUG = int(config['global']['debug'])
-WIBEEE_URL = config['wibeee']['wibeee_url']
-HA = int(config['global'].get('ha', 0))  # returns 0 as default
-HA_DISCOVER_TOPIC = config['global'].get('ha_discover_prefix', 'homeassistant')
+# Si no se encuentra el archivo, config.sections() estará vacío
+if not config.sections():
+    config_path = os.path.abspath(config_file)
+    config_dir = os.path.dirname(config_path)
+    logging.warning(
+        f"Config file '{config_file}' not found or empty. \n"
+        f"Looked for file at: {config_path} in directory: {config_dir}. \n"
+        "Falling back to environment variables."
+    )
 
-broker_address = config['mqtt']['address']
-broker_port = int(config['mqtt']['port'])
-broker_username = config['mqtt']['username']
-broker_password = config['mqtt']['password']
+check_required_config()
+
+DEBUG = int(get_config_value('global', 'debug', default=0, env_var='WIBEEE_DEBUG'))
+WIBEEE_URL = get_config_value('wibeee', 'wibeee_url', default=None, env_var='WIBEEE_URL')
+HA = int(get_config_value('global', 'ha', default=0, env_var='WIBEEE_HA'))
+HA_DISCOVER_TOPIC = get_config_value('global', 'ha_discover_prefix', default='homeassistant', env_var='WIBEEE_HA_DISCOVER_PREFIX')
+
+broker_address = get_config_value('mqtt', 'address', default='localhost', env_var='MQTT_ADDRESS')
+broker_port = int(get_config_value('mqtt', 'port', default=1883, env_var='MQTT_PORT'))
+broker_username = get_config_value('mqtt', 'username', default=None, env_var='MQTT_USERNAME')
+broker_password = get_config_value('mqtt', 'password', default=None, env_var='MQTT_PASSWORD')
 
 my_logging('Starting wibeee2mqtt... ')
 
