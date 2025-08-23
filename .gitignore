@@ -1,1 +1,4 @@
 wibeee2mqtt.conf*
+.vscode/
+compose*yaml
+
