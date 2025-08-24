@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 import syslog
 import logging, sys
 import urllib3
+from urllib3.exceptions import MaxRetryError, HTTPError
 import os
 
 Connected = 0
@@ -17,7 +18,7 @@ def my_logging(msg):
         logging.debug(msg)
     syslog.syslog(syslog.LOG_INFO, msg)
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
         my_logging('Connected to broker with the result code: ' + str(rc))
         global Connected
@@ -25,13 +26,13 @@ def on_connect(client, userdata, flags, rc):
     else:
         my_logging('Connected to broker failed with the result code: ' + str(rc))
 
-def on_disconnect(client, userdata, rc):
+def on_disconnect(client, userdata, rc, properties):
     global Connected
     Connected = 0
 
-def on_publish(client, userdata, result):
+def on_publish(client, userdata, mid, rc, properties):
     if DEBUG:
-        my_logging('Data published result: ' + str(result))
+        my_logging(f"Published message mid={mid}, reasonCodes={rc}")
     pass
 
 def getpage(url):
@@ -195,8 +196,8 @@ def check_required_config():
         sys.exit(1)
 
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
-logging.getLogger("urllib3").setLevel(logging.WARNING)
-
+#logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.ERROR)
 
 config = configparser.ConfigParser()
 config_file = 'wibeee2mqtt.conf'
@@ -218,26 +219,26 @@ DEBUG = int(get_config_value('global', 'debug', default=0, env_var='WIBEEE_DEBUG
 WIBEEE_URL = get_config_value('wibeee', 'wibeee_url', default=None, env_var='WIBEEE_URL')
 HA = int(get_config_value('global', 'ha', default=0, env_var='WIBEEE_HA'))
 HA_DISCOVER_TOPIC = get_config_value('global', 'ha_discover_prefix', default='homeassistant', env_var='WIBEEE_HA_DISCOVER_PREFIX')
-
-broker_address = get_config_value('mqtt', 'address', default='localhost', env_var='MQTT_ADDRESS')
-broker_port = int(get_config_value('mqtt', 'port', default=1883, env_var='MQTT_PORT'))
-broker_username = get_config_value('mqtt', 'username', default=None, env_var='MQTT_USERNAME')
-broker_password = get_config_value('mqtt', 'password', default=None, env_var='MQTT_PASSWORD')
+LOOP_WAIT = int(get_config_value('global', 'loop_wait', default=10, env_var='LOOP_WAIT'))
+BROKER_ADDRESS = get_config_value('mqtt', 'address', default='localhost', env_var='MQTT_ADDRESS')
+BROKER_PORT = int(get_config_value('mqtt', 'port', default=1883, env_var='MQTT_PORT'))
+BROKER_USERNAME = get_config_value('mqtt', 'username', default=None, env_var='MQTT_USERNAME')
+BROKER_PASSWORD = get_config_value('mqtt', 'password', default=None, env_var='MQTT_PASSWORD')
 
 my_logging('Starting wibeee2mqtt... ')
 
-client = mqttClient.Client(mqttClient.CallbackAPIVersion.VERSION1, "wibeee2mqtt client")
-client.username_pw_set(broker_username, password=broker_password)
+client = mqttClient.Client(mqttClient.CallbackAPIVersion.VERSION2, "wibeee2mqtt client")
+client.username_pw_set(BROKER_USERNAME, password=BROKER_PASSWORD)
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_publish = on_publish
-client.connect(broker_address, port=broker_port)
+client.connect(BROKER_ADDRESS, port=BROKER_PORT)
 
 # var to ensure the last value readed in fase4_energia_activa, because sometimes is less that the actual value
 last_fase4_energia_activa_value = None
 
 while True:
-    time.sleep(10)
+    time.sleep(LOOP_WAIT)
     client.loop()
     if DEBUG:
         my_logging('HA enabled: ' + str(HA))
@@ -311,5 +312,5 @@ while True:
                 # Publica os dados lidos no tópico MQTT
                 client.publish("wibeee/" + child.tag, child.text)
     else:
-        client.connect(broker_address, port=broker_port)
+        client.connect(BROKER_ADDRESS, port=BROKER_PORT)
         time.sleep(5)
